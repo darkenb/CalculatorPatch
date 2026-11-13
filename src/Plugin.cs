@@ -12,15 +12,15 @@ using DSPCalculator.Logic;
 using DSPCalculator.UI;
 using HarmonyLib;
 
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyInformationalVersion("1.0.1")]
 
 namespace CalculatorPatch
 {
     // Fixes for DSPCalculator 0.5.25, applied to the original mod at runtime with Harmony. The calculator's own DLL is
     // not changed. A build of the calculator that already carries these fixes is left alone.
-    [BepInPlugin(Guid, "BUG_CalculatorPatch", "1.0.0")]
+    [BepInPlugin(Guid, "BUG_CalculatorPatch", "1.0.1")]
     [BepInDependency(Calculator)]
     [BepInDependency("crecheng.DSPModSave")]
     [BepInDependency(OreEnrichment, BepInDependency.DependencyFlags.SoftDependency)]
@@ -280,6 +280,9 @@ namespace CalculatorPatch
 
         [HarmonyPostfix, HarmonyPatch(typeof(UICalcWindow), nameof(UICalcWindow.RefreshResourceNeedAndByProductContent))]
         static void Sources(UICalcWindow __instance) => CalcFixes.AddSourcesSection(__instance);
+
+        [HarmonyPostfix, HarmonyPatch(typeof(UIItemNode), MethodType.Constructor, typeof(ItemNode), typeof(UICalcWindow))]
+        static void IncSwitchInside(UIItemNode __instance) => CalcFixes.FitIncSwitch(__instance);
 
         [HarmonyPostfix, HarmonyPatch(typeof(UIItemNode), nameof(UIItemNode.RefreshAssemblerDisplay))]
         static void SharedRecipe(UIItemNode __instance) => CalcFixes.MarkSharedRecipe(__instance);

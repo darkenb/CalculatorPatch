@@ -9,6 +9,49 @@ using UnityEngine.UI;
 
 public static class CalcFixes
 {
+	// The proliferator mode switch of a row is a clone of the game's assembler window switch at a fixed spot. With its thumb
+	// on the right (Production Speedup) it reached past the visible list and was cut off: the switch is moved left until it
+	// fits, thumb on the right, left of the scrollbar.
+	public static void FitIncSwitch(UIItemNode ui)
+	{
+		if (ui == null || ui.incToggleObj == null || ui.parentCalcWindow == null || ui.parentCalcWindow.contentScrollRect == null)
+		{
+			return;
+		}
+		Transform toggle = ui.incToggleObj.transform;
+		RectTransform track = toggle.Find("inc-switch") as RectTransform;
+		RectTransform thumb = toggle.Find("inc-switch/switch-thumb") as RectTransform;
+		ScrollRect scroll = ui.parentCalcWindow.contentScrollRect;
+		RectTransform view = scroll.viewport != null ? scroll.viewport : scroll.transform as RectTransform;
+		if (track == null || thumb == null || view == null || toggle.parent == null || toggle.parent.lossyScale.x <= 0f)
+		{
+			return;
+		}
+		Vector3[] corners = new Vector3[4];
+		view.GetWorldCorners(corners);
+		float limit = corners[2].x;
+		if (scroll.verticalScrollbar != null && scroll.verticalScrollbar.gameObject.activeInHierarchy)
+		{
+			((RectTransform)scroll.verticalScrollbar.transform).GetWorldCorners(corners);
+			limit = Mathf.Min(limit, corners[0].x);
+		}
+		track.GetWorldCorners(corners);
+		float right = corners[2].x;
+		thumb.GetWorldCorners(corners);
+		right = Mathf.Max(right, corners[2].x + (10f - thumb.anchoredPosition.x) * thumb.parent.lossyScale.x);
+		float over = OverflowLocal(right, limit, toggle.parent.lossyScale.x);
+		if (over > 0f)
+		{
+			toggle.localPosition -= new Vector3(over, 0f, 0f);
+		}
+	}
+
+	// How far (in the row's units) the switch must move left so its right end stays 8 units inside the limit.
+	public static float OverflowLocal(float rightWorld, float limitWorld, float scale)
+	{
+		return scale <= 0f ? 0f : (rightWorld - limitWorld) / scale + 8f;
+	}
+
 	private static HashSet<ItemConfig> autoRaw;
 
 	private static List<string> pendingData;
