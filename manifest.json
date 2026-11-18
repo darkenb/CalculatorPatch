@@ -1,8 +1,8 @@
 {
     "name": "BUG_CalculatorPatch",
-    "version_number": "1.0.1",
+    "version_number": "1.0.2",
     "website_url": "https://github.com/darkenb/CalculatorPatch",
-    "description": "Fixes for DSPCalculator 0.5.25, applied at runtime: GenesisBook machines, recipes and output maths, loop handling, saved windows, and BUG_OreEnrichment support. The calculator itself is not changed.",
+    "description": "Fixes for DSPCalculator 0.5.25, applied at runtime: GenesisBook machines, recipes and output maths, production loops, surplus used inside the line, saved windows, BUG_OreEnrichment and BUG_Reclamation support. The calculator is not changed.",
     "dependencies": [
         "xiaoye97-BepInEx-5.4.17",
         "jinxOAO-DSPCalculator-0.5.25",

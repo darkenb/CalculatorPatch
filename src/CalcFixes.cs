@@ -9,6 +9,66 @@ using UnityEngine.UI;
 
 public static class CalcFixes
 {
+	// The settings checkboxes on the Main Info page sit in two columns at fixed spots (relics at x 0, the rest at x 110,
+	// the percentage inputs at x 215). Their labels kept the width of the game's checkbox they were cloned from, so
+	// "Proliferator Extra" ran under its input and "Round up ..." wrapped onto the line below. Each label now ends where
+	// the next thing starts and shrinks its font until it fits.
+	public static void FitCheckBoxLabels(UICalcWindow w)
+	{
+		if (w == null || w.txtRoundUp == null)
+		{
+			return;
+		}
+		if (w.txtRoundUp.text.Contains("facilitiy"))
+		{
+			w.txtRoundUp.text = w.txtRoundUp.text.Replace("facilitiy", "facility");
+		}
+		Transform group = w.txtRoundUp.transform.parent.parent;
+		RectTransform panel = group.parent != null ? group.parent.parent as RectTransform : null;
+		float panelRight = (panel != null) ? group.InverseTransformPoint(panel.TransformPoint(new Vector3(panel.rect.xMax, 0f, 0f))).x : 250f;
+		FitLabel(w.txtBluebuff, group, 106f);
+		FitLabel(w.txtEnergyBurst, group, 106f);
+		FitLabel(w.txtDirac, group, 106f);
+		FitLabel(w.txtInferior, group, 106f);
+		FitLabel(w.txtIncMilli, group, 212f);
+		FitLabel(w.txtAccMilli, group, 212f);
+		FitLabel(w.txtRoundUp, group, panelRight - 6f);
+		FitLabel(w.txtSolveProlifer, group, panelRight - 6f);
+		FitLabel(w.txtMixbelt, group, panelRight - 6f);
+	}
+
+	// right: where the label must end, in the checkbox group's space. Its left edge stays where it is.
+	private static void FitLabel(Text text, Transform group, float right)
+	{
+		if (text == null)
+		{
+			return;
+		}
+		RectTransform rt = text.rectTransform;
+		RectTransform box = rt.parent as RectTransform;
+		if (box == null)
+		{
+			return;
+		}
+		float left = group.InverseTransformPoint(rt.TransformPoint(new Vector3(rt.rect.xMin, 0f, 0f))).x;
+		float inset = box.InverseTransformPoint(rt.TransformPoint(new Vector3(rt.rect.xMin, 0f, 0f))).x - box.rect.xMin;
+		float width = right - left;
+		if (width < 20f)
+		{
+			return;
+		}
+		if (!text.resizeTextForBestFit)
+		{
+			text.resizeTextMaxSize = text.fontSize;
+			text.resizeTextMinSize = Mathf.Min(9, text.fontSize);
+			text.resizeTextForBestFit = true;
+		}
+		text.horizontalOverflow = HorizontalWrapMode.Wrap;
+		text.verticalOverflow = VerticalWrapMode.Truncate;
+		rt.SetInsetAndSizeFromParentEdge(RectTransform.Edge.Left, inset, width);
+		rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, 20f);
+	}
+
 	// The proliferator mode switch of a row is a clone of the game's assembler window switch at a fixed spot. With its thumb
 	// on the right (Production Speedup) it reached past the visible list and was cut off: the switch is moved left until it
 	// fits, thumb on the right, left of the scrollbar.
@@ -282,6 +342,11 @@ public static class CalcFixes
 			{
 				continue;
 			}
+			// A loop that shrinks every round is closed by the solver (Loops): its items stay made.
+			if (Loops.Gain(userPreference, LoopThrough(tree, item.ID)) < Loops.MaxGain)
+			{
+				continue;
+			}
 			List<int> list = new List<int>();
 			bool flag = false;
 			for (int i = 0; i < value.resources.Length; i++)
@@ -334,9 +399,108 @@ public static class CalcFixes
 		return false;
 	}
 
+	// X on a raw row. The original keeps the change even when the solve then hits a loop, so the window empties while its
+	// popup says the change will not take effect; here the click is undone in that case and the previous result comes back.
+	public static void RemoveFromRaw(UIItemNodeSimple ui)
+	{
+		double.TryParse(ui.parentCalcWindow.speedInputObj.GetComponent<InputField>().text, out double speed);
+		bool made = MakeInstead(ui.parentCalcWindow.solution, ui.itemNode.itemId, speed, out List<int> loop);
+		ui.parentCalcWindow.RefreshAll();
+		if (!made && loop.Count > 1)
+		{
+			var names = new List<string>();
+			foreach (int id in loop) names.Add(Utils.GetItemName(id));
+			UIRealtimeTip.Popup(Utils.GetItemName(loop[0]) + " is not made: it closes a production loop\n" + string.Join(" -> ", names.ToArray())
+				+ "\nThe calculator cannot make every item of a loop. Keep one of them as a raw resource.", false);
+		}
+	}
+
+	// Product row: right click on the item's picture counts it as raw again, the opposite of X in the raw list.
+	public static void RightClickToRaw(UIItemNode ui)
+	{
+		if (ui.itemNode == null || ui.obj == null || !CalcDB.itemDict.TryGetValue(ui.itemNode.itemId, out var data) || data.recipes.Count == 0) return;
+		Transform icon = ui.obj.transform.Find("icon");
+		UIButton button = icon == null ? null : (UIButton)icon.GetComponent(typeof(UIButton));
+		if (button != null) button.onRightClick += delegate { ui.OnConsiderAsRawOreButtonClick(); };
+	}
+
+	// The items the solver would walk through from itemId back to itemId: each item's chosen recipe (or its first),
+	// inputs that are raw end the walk. Empty when there is no such loop.
+	public static List<int> LoopThrough(SolutionTree solution, int itemId)
+	{
+		var path = new List<int>();
+		var dead = new HashSet<int>();
+		return Walk(solution.userPreference, itemId, itemId, path, dead) ? path : new List<int>();
+	}
+
+	private static bool Walk(UserPreference pref, int item, int target, List<int> path, HashSet<int> dead)
+	{
+		if (path.Count > 0 && item == target)
+		{
+			path.Add(item);
+			return true;
+		}
+		if (dead.Contains(item) || path.Contains(item) || IsRaw(pref, item)) return false;
+		NormalizedRecipe recipe = null;
+		if (pref.itemConfigs.TryGetValue(item, out var c) && c.recipeID > 0) CalcDB.recipeDict.TryGetValue(c.recipeID, out recipe);
+		if (recipe == null) recipe = CalcDB.itemDict[item].recipes[0];
+		path.Add(item);
+		for (int i = 0; i < recipe.resources.Length; i++)
+			if (recipe.resourceCounts[i] > 0 && Walk(pref, recipe.resources[i], target, path, dead)) return true;
+		path.RemoveAt(path.Count - 1);
+		dead.Add(item);
+		return false;
+	}
+
+	// Returns false when the item could not be made (loop) and its setting was put back; loop: the loop it closed.
+	public static bool MakeInstead(SolutionTree solution, int itemId, double speed, out List<int> loop)
+	{
+		loop = new List<int>();
+		UserPreference pref = solution.userPreference;
+		bool had = pref.itemConfigs.TryGetValue(itemId, out ItemConfig c);
+		bool force = had && c.forceNotOre, raw = had && c.consideredAsOre;
+		if (!had)
+		{
+			c = pref.itemConfigs[itemId] = new ItemConfig(itemId);
+		}
+		c.forceNotOre = true;
+		c.consideredAsOre = false;
+		if (TrySolve(solution, speed))
+		{
+			return true;
+		}
+		loop = LoopThrough(solution, itemId);
+		if (had)
+		{
+			c.forceNotOre = force;
+			c.consideredAsOre = raw;
+		}
+		else
+		{
+			pref.itemConfigs.Remove(itemId);
+		}
+		TrySolve(solution, speed);
+		return false;
+	}
+
+	private static bool TrySolve(SolutionTree solution, double speed)
+	{
+		try
+		{
+			return solution.ReSolve(speed);
+		}
+		catch (System.NullReferenceException)  // the loop popup without a game UI (offline check)
+		{
+			return false;
+		}
+	}
+
 	public static double ListedNeed(ItemNode n)
 	{
-		if (n.byProductRecipes.Count > 0 && n.speedFromOre <= 0.001 && n.satisfiedSpeed >= n.needSpeed - 0.001 && n.IsOre(n.solutionTree.userPreference))
+		// Fully covered by by-products of other rows: hidden if it is raw, or if no machine of its own makes it
+		// (no recipe, or its recipe is one of those by-product sources and is counted on that row).
+		if (n.byProductRecipes.Count > 0 && n.speedFromOre <= 0.001 && n.satisfiedSpeed >= n.needSpeed - 0.001
+			&& (n.IsOre(n.solutionTree.userPreference) || n.mainRecipe == null || n.mainRecipe.count <= 0.001 || n.byProductRecipes.Contains(n.mainRecipe)))
 		{
 			return 0.0;
 		}
@@ -383,12 +547,32 @@ public static class CalcFixes
 		}
 	}
 
-	private static void AddSourceCard(UICalcWindow w, int focusItem, Sprite icon, double speed, string title, string text)
+	// icon null: the item's own picture. mark: a small picture in the corner (the vein for raw supply), so a card is never
+	// just the stock vein icon, nor empty when a recipe's IconPath does not load.
+	private static void AddSourceCard(UICalcWindow w, int focusItem, Sprite icon, double speed, string title, string text, Sprite mark = null)
 	{
 		UIItemNodeSimple uIItemNodeSimple = new UIItemNodeSimple(new ItemNode(focusItem, 0.0, w.solution), isResources: false, w);
 		uIItemNodeSimple.outputText.text = Utils.KMG(speed);
 		Transform transform = uIItemNodeSimple.obj.transform.Find("icon");
-		((Image)transform.GetComponent(typeof(Image))).sprite = icon;
+		Image image = (Image)transform.GetComponent(typeof(Image));
+		if (icon == null)
+		{
+			ItemProto item = LDB.items.Select(focusItem);
+			icon = (item != null) ? item.iconSprite : null;
+		}
+		image.sprite = icon;
+		if (mark != null)
+		{
+			GameObject corner = new GameObject("source-mark", typeof(RectTransform), typeof(Image));
+			corner.transform.SetParent(transform, false);
+			RectTransform rt = (RectTransform)corner.transform;
+			rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(1f, 0f);
+			rt.anchoredPosition = new Vector2(4f, -4f);
+			rt.sizeDelta = new Vector2(16f, 16f);
+			Image markImage = corner.GetComponent<Image>();
+			markImage.sprite = mark;
+			markImage.raycastTarget = false;
+		}
 		UIButton obj = (UIButton)transform.GetComponent(typeof(UIButton));
 		obj.tips.itemId = 0;
 		obj.tips.tipTitle = title;
@@ -454,7 +638,7 @@ public static class CalcFixes
 				{
 					w.uiSideItemNodes.Add(new UIItemNodeSimple("", w));
 				}
-				AddSourceCard(w, value.itemId, UIItemNodeSimple.oreSprite, value.speedFromOre, "Raw", itemName + " supplied from outside (Raw Resources Demands)");
+				AddSourceCard(w, value.itemId, null, value.speedFromOre, "Raw", itemName + " supplied from outside (Raw Resources Demands)", UIItemNodeSimple.oreSprite);
 			}
 			while (w.uiSideItemNodes.Count % 3 != 0)
 			{
